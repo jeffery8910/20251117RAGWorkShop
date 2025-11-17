@@ -1,0 +1,226 @@
+{
+  "name": "LINE RAG with Qdrant (Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "line/webhook",
+        "methods": [
+          "POST"
+        ],
+        "responseMode": "lastNode",
+        "options": {
+          "binaryData": false
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ],
+      "webhookId": "line-rag-qdrant"
+    },
+    {
+      "parameters": {
+        "mode": "keepKeyMatches",
+        "values": {
+          "string": [
+            { "name": "GEMINI_API_KEY", "value": "YOUR_GEMINI_API_KEY" },
+            { "name": "EMBED_MODEL", "value": "text-embedding-004" },
+            { "name": "GEN_MODEL", "value": "gemini-2.5-flash" },
+            { "name": "QDRANT_URL", "value": "https://YOUR-QDRANT-ENDPOINT" },
+            { "name": "QDRANT_API_KEY", "value": "YOUR_QDRANT_API_KEY" },
+            { "name": "QDRANT_COLLECTION", "value": "workshop_rag_docs" },
+            { "name": "LINE_CHANNEL_ACCESS_TOKEN", "value": "YOUR_LINE_CHANNEL_ACCESS_TOKEN" },
+            { "name": "TOP_K", "value": "6" }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract user message and replyToken from LINE webhook\nconst ev = items[0].json.body?.events?.[0] || {};\nconst text = ev?.message?.text || '';\nconst replyToken = ev?.replyToken || '';\nreturn [{ json: { text, replyToken } }];"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{'https://generativelanguage.googleapis.com/v1beta/models/' + $json.EMBED_MODEL + ':embedContent'}}",
+        "options": {},
+        "allowUnauthorizedCerts": false,
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": false,
+        "authentication": "none",
+        "headerParametersJson": "={\"x-goog-api-key\": $json.GEMINI_API_KEY, \"content-type\": \"application/json\"}",
+        "bodyParametersJson": "={{ { model: 'models/' + $json.EMBED_MODEL, taskType: 'RETRIEVAL_QUERY', content: { parts: [{ text: $json.text }] } } }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1020,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Map Gemini embedding to Qdrant search request\nconst values = items[0].json.embedding?.values || [];\nreturn [{ json: { vector: values } }];"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.QDRANT_URL + '/collections/' + $json.QDRANT_COLLECTION + '/points/search'}}",
+        "options": {},
+        "allowUnauthorizedCerts": false,
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": false,
+        "authentication": "none",
+        "headerParametersJson": "={{{\"api-key\": $json.QDRANT_API_KEY, \"content-type\": \"application/json\"}}}",
+        "bodyParametersJson": "={{ { vector: $json.vector, limit: Number($json.TOP_K)||6, with_payload: true } }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build context and prompt for generation\nconst points = items[0].json || [];\nconst ctx = []; let used = 0; const MAX = 2000;\nfor (const p of points) {\n  const t = p.payload?.text || p.payload?.content || '';\n  if (!t) continue; if (used + t.length > MAX) break; used += t.length;\n  const src = p.payload?.source || '-'; const page = p.payload?.page ?? '-'; const sec = p.payload?.section ? '・' + p.payload.section : '';\n  ctx.push(`- ${t}\n(來源:${src} p.${page} ${sec})`);\n}\nconst question = $item(2).$node[\"Function\"].json.text;\nconst sys = '你是一位助教。請以提供的教材內容回答，並清楚引用來源。';\nreturn [{ json: { prompt: `${sys}\n\n已檢索到的教材片段：\n${ctx.join('\n')}\n\n使用者問題：${question}` } }];"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{'https://generativelanguage.googleapis.com/v1beta/models/' + $json.GEN_MODEL + ':generateContent'}}",
+        "options": {},
+        "allowUnauthorizedCerts": false,
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": false,
+        "authentication": "none",
+        "headerParametersJson": "={\"x-goog-api-key\": $json.GEMINI_API_KEY, \"content-type\": \"application/json\"}",
+        "bodyParametersJson": "={{ { contents: [{ role: 'user', parts: [{ text: $json.prompt }] }] } }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const t = items[0].json.candidates?.[0]?.content?.parts?.[0]?.text || '(無內容)';\nconst replyToken = $item(2).$node[\"Function\"].json.replyToken;\nreturn [{ json: { replyToken, text: t } }];"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "options": {},
+        "allowUnauthorizedCerts": false,
+        "queryParametersUi": {
+          "parameter": []
+        },
+        "jsonParameters": true,
+        "sendBinaryData": false,
+        "authentication": "none",
+        "headerParametersJson": "={{{\"Authorization\": 'Bearer ' + $json.LINE_CHANNEL_ACCESS_TOKEN, \"content-type\": \"application/json\"}}}",
+        "bodyParametersJson": "={{ { replyToken: $json.replyToken, messages: [{ type: 'text', text: $json.text }] } }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2480,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Set": {
+      "main": [
+        [
+          { "node": "Function", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Set", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Function": {
+      "main": [
+        [
+          { "node": "HTTP Request", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          { "node": "Function1", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Function1": {
+      "main": [
+        [
+          { "node": "HTTP Request1", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          { "node": "Function2", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Function2": {
+      "main": [
+        [
+          { "node": "HTTP Request2", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  }
+}

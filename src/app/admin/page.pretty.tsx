@@ -1,0 +1,354 @@
+"use client";
+import { useEffect, useMemo, useState } from 'react';
+import AdminGate from './AdminGate';
+import Overlay from '@/components/Overlay';
+import Info from '@/components/Info';
+import Tabs from '@/components/Tabs';
+import ConfigPanel from '@/components/ConfigPanel';
+import UploadPanel from '@/components/UploadPanel';
+import TextUploadPanel from '@/components/TextUploadPanel';
+import TestPanel from '@/components/TestPanel';
+import DataManagementPanel from '@/components/DataManagementPanel';
+import LogsPanel from '@/components/LogsPanel';
+import Toast from '@/components/Toast';
+
+type Config = { 
+  prompt: string; 
+  keywords: string[]; 
+  TOPK: number; 
+  SCORE_THRESHOLD: number; 
+  NUM_CANDIDATES: number;
+  forwardToN8nUrl?: string;
+  forwardRule?: string;
+};
+
+export default function AdminPage(){
+  const [token, setToken] = useState<string>('');
+  const [cfg, setCfg] = useState<Config>({
+    prompt: '',
+    keywords: [],
+    TOPK: 6,
+    SCORE_THRESHOLD: 0.1,
+    NUM_CANDIDATES: 400,
+    forwardToN8nUrl: '',
+    forwardRule: ''
+  });
+  const [q, setQ] = useState('請輸入一個測試問題');
+  const [answer, setAnswer] = useState('');
+  const [logs, setLogs] = useState<any[]>([]);
+  const auth = useMemo(()=> ({ headers: { Authorization: `Bearer ${token}` } }), [token]);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null);
+
+  useEffect(()=>{
+    const t = localStorage.getItem('adminToken') || '';
+    setToken(t);
+    // 讀取現有設定（未授權時忽略錯誤）
+    fetch('/api/admin/config').then(r=>r.json()).then(setCfg).catch(()=>{});
+  },[]);
+
+  const saveToken = () => { 
+    localStorage.setItem('adminToken', token); 
+    showToast('已保存 Admin Token（僅此瀏覽器）', 'success'); 
+  };
+
+  const [savingCfg, setSavingCfg] = useState(false);
+  const saveConfig = async () => {
+    try {
+      setSavingCfg(true);
+      const res = await fetch('/api/admin/config', { method:'PUT', headers:{ 'content-type':'application/json', ...auth.headers }, body: JSON.stringify(cfg) });
+      if (!res.ok) return showToast('儲存失敗', 'error');
+      const j = await res.json(); setCfg(j); showToast('設定已更新', 'success');
+    } finally { setSavingCfg(false); }
+  };
+
+  const [pasting, setPasting] = useState(false);
+  const uploadDoc = async (content: string, source: string, page?: number, section?: string) => {
+    try {
+      setPasting(true);
+      const res = await fetch('/api/admin/docs', { method:'POST', headers:{ 'content-type':'application/json', ...auth.headers }, body: JSON.stringify({ content, source, page, section }) });
+      if (!res.ok) return showToast('上傳失敗', 'error');
+      const j = await res.json(); showToast(`已寫入 ${j.inserted} 個分塊`, 'success');
+      // 上傳成功後刷新來源清單
+      loadSources();
+    } finally { setPasting(false); }
+  };
+
+  const [testing, setTesting] = useState(false);
+  const runTest = async () => {
+    setAnswer(''); setTesting(true);
+    try {
+      const res = await fetch('/api/test', { method:'POST', headers:{ 'content-type':'application/json', ...auth.headers }, body: JSON.stringify({ question: q }) });
+      if (!res.ok) return setAnswer('請求失敗/未授權');
+      const j = await res.json(); setAnswer(j.answer || '(無內容)');
+    } finally { setTesting(false); }
+  };
+
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const loadLogs = async () => {
+    try {
+      setLoadingLogs(true);
+      const res = await fetch('/api/admin/logs?limit=50', { headers: { ...auth.headers } });
+      if (!res.ok) return showToast('讀取日誌失敗/未授權', 'error');
+      const j = await res.json(); setLogs(j.logs || []);
+    } finally { setLoadingLogs(false); }
+  };
+
+  const [docText, setDocText] = useState('');
+  const [docSource, setDocSource] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [chunkSize, setChunkSize] = useState(800);
+  const [overlap, setOverlap] = useState(120);
+  const [manageSource, setManageSource] = useState('');
+  const [sources, setSources] = useState<string[]>([]);
+  const [loadingSources, setLoadingSources] = useState(false);
+
+  const loadSources = async () => {
+    try {
+      setLoadingSources(true);
+      const res = await fetch('/api/admin/docs/sources', { headers: { ...auth.headers } });
+      if (!res.ok) return;
+      const j = await res.json();
+      setSources(Array.isArray(j.sources)? j.sources : []);
+    } finally { setLoadingSources(false); }
+  };
+  useEffect(()=>{ if (token) loadSources(); }, [token]);
+  const [managing, setManaging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadReport, setUploadReport] = useState<any|null>(null);
+  const copy = async (text: string) => { 
+    try { 
+      await navigator.clipboard.writeText(text); 
+      showToast('已複製到剪貼簿', 'success'); 
+    } catch { 
+      showToast('複製失敗', 'error'); 
+    } 
+  };
+  const uploadFiles = async () => {
+    if (!files?.length) return showToast('請先選擇檔案', 'warning');
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f);
+    fd.append('chunkSize', String(chunkSize));
+    fd.append('overlap', String(overlap));
+    setUploading(true); setUploadPct(0); setUploadMsg('開始上傳…'); setUploadReport(null);
+    await new Promise<void>((resolve)=>{
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/admin/docs/upload', true);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setUploadPct(pct);
+          setUploadMsg(`已上傳 ${(e.loaded/1024/1024).toFixed(2)} MB / ${(e.total/1024/1024).toFixed(2)} MB`);
+        } else {
+          setUploadMsg('正在上傳…');
+        }
+      };
+      xhr.onerror = () => {
+        setUploading(false);
+        setUploadMsg('網路錯誤，請稍後再試');
+        resolve();
+      };
+      xhr.onload = () => {
+        setUploading(false);
+        try {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const j = JSON.parse(xhr.responseText || '{}');
+            setUploadReport(j);
+            const okList = (j.results||[]).map((r:any)=> `${r.file}：${r.inserted}`);
+            const errList = (j.errors||[]).map((e:any)=> `${e.file}：${e.error}`);
+            setUploadMsg(`總寫入 ${j.totalInserted||0} 個分塊。` + (errList.length? ` 錯誤：${errList.length} 件` : ''));
+            // 上傳成功後刷新來源清單
+            loadSources();
+          } else {
+            setUploadMsg(`上傳失敗：${xhr.responseText || xhr.statusText || xhr.status}`);
+          }
+        } catch (e:any) {
+          setUploadMsg(`解析回應失敗：${e?.message||e}`);
+        }
+        resolve();
+      };
+      xhr.send(fd);
+    });
+  };
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  return (
+    <AdminGate>
+      <div className="space-y-6">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-white mb-2">RAG × LINE 管理介面</h1>
+              <p className="text-gray-400">管理您的 RAG 系統配置、文檔和對話記錄</p>
+            </div>
+            <div className="flex items-center space-x-4">
+              <a 
+                href="/admin/conversations" 
+                className="text-green-400 hover:text-green-300 transition-colors flex items-center space-x-2"
+              >
+                <span>→ 對話紀錄</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <Tabs
+          tabs={[
+            {
+              id: 'config',
+              label: '系統設定',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <ConfigPanel
+                    config={cfg}
+                    onConfigChange={setCfg}
+                    onSave={saveConfig}
+                    loading={savingCfg}
+                  />
+                </div>
+              )
+            },
+            {
+              id: 'upload',
+              label: '檔案上傳',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <UploadPanel
+                    files={files}
+                    chunkSize={chunkSize}
+                    overlap={overlap}
+                    onFilesChange={setFiles}
+                    onChunkSizeChange={setChunkSize}
+                    onOverlapChange={setOverlap}
+                    onUpload={uploadFiles}
+                    uploading={uploading}
+                    uploadProgress={uploadPct}
+                    uploadMessage={uploadMsg}
+                    uploadReport={uploadReport}
+                  />
+                </div>
+              )
+            },
+            {
+              id: 'text-upload',
+              label: '文字上傳',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <TextUploadPanel
+                    docText={docText}
+                    docSource={docSource}
+                    onDocTextChange={setDocText}
+                    onDocSourceChange={setDocSource}
+                    onUpload={() => uploadDoc(docText, docSource)}
+                    loading={pasting}
+                  />
+                </div>
+              )
+            },
+            {
+              id: 'test',
+              label: '線上測試',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <TestPanel
+                    question={q}
+                    answer={answer}
+                    onQuestionChange={setQ}
+                    onTest={runTest}
+                    loading={testing}
+                  />
+                </div>
+              )
+            },
+            {
+              id: 'data-management',
+              label: '資料管理',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <DataManagementPanel
+                    sources={sources}
+                    selectedSource={manageSource}
+                    onSourceChange={setManageSource}
+                    onLoadSources={loadSources}
+                    onDeleteSource={async () => {
+                      if (!manageSource) return showToast('請選擇來源檔名', 'warning');
+                      if (!confirm(`確定刪除來源「${manageSource}」的所有分塊？此動作無法還原。`)) return;
+                      setManaging(true);
+                      try{
+                        const res = await fetch(`/api/admin/docs?source=${encodeURIComponent(manageSource)}`, { method:'DELETE', headers: { ...auth.headers } });
+                        if (!res.ok) return showToast('刪除失敗/未授權', 'error');
+                        showToast('刪除完成', 'success');
+                        setManageSource('');
+                        loadSources();
+                      } finally { setManaging(false); }
+                    }}
+                    onReembedSource={async () => {
+                      if (!manageSource) return showToast('請選擇來源檔名', 'warning');
+                      if (!confirm(`將重新為來源「${manageSource}」所有分塊產生嵌入，可能需要時間。要繼續嗎？`)) return;
+                      setManaging(true);
+                      try{
+                        const res = await fetch('/api/admin/docs/reembed', { method:'POST', headers: { 'content-type':'application/json', ...auth.headers }, body: JSON.stringify({ source: manageSource }) });
+                        if (!res.ok) return showToast('重嵌失敗/未授權', 'error');
+                        const j = await res.json();
+                        showToast(`重嵌完成，共處理 ${j.reembedded} 個分塊`, 'success');
+                      } finally { setManaging(false); }
+                    }}
+                    onClearCollection={async () => {
+                      if (!confirm('將清空整個向量集合（或 Atlas docs 集合）。確定繼續？')) return;
+                      setManaging(true);
+                      try{
+                        const res = await fetch('/api/admin/vector/clear', { method:'POST', headers: { ...auth.headers } });
+                        if (!res.ok) return showToast('清空失敗/未授權', 'error');
+                        showToast('已清空集合', 'success');
+                        setManageSource('');
+                        loadSources();
+                      } finally { setManaging(false); }
+                    }}
+                    loading={loadingSources}
+                    managing={managing}
+                  />
+                </div>
+              )
+            },
+            {
+              id: 'logs',
+              label: '系統日誌',
+              content: (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                  <LogsPanel
+                    logs={logs}
+                    onLoadLogs={loadLogs}
+                    loading={loadingLogs}
+                  />
+                </div>
+              )
+            }
+          ]}
+        />
+      </div>
+      
+      <Overlay show={uploading || pasting || testing || savingCfg || loadingLogs || managing} message={
+        uploading ? (uploadPct<100 ? '檔案上傳中…' : '伺服器處理中（分塊/嵌入/寫入向量）…') :
+        pasting ? '寫入中…' :
+        testing ? '生成回覆中…' :
+        savingCfg ? '保存設定中…' :
+        loadingLogs ? '載入日誌…' :
+        managing ? '執行資料管理操作…' : '處理中…'
+      } />
+      
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+    </AdminGate>
+  );
+}

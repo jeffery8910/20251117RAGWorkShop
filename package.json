@@ -1,0 +1,32 @@
+{
+  "name": "rag-line-cloud-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "1.9.0",
+    "mammoth": "1.6.0",
+    "mongodb": "^6.8.0",
+    "mysql2": "3.11.3",
+    "next": "14.2.5",
+    "pdf-parse": "1.1.1",
+    "pg": "8.12.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.7"
+  }
+}

@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: rag-line-cloud-app
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: LOG_PROVIDER
+        value: atlas
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EMBED_MODEL
+        value: gemini-embedding-001
+      - key: EMBED_DIM
+        value: "768"
+      - key: GEN_MODEL
+        value: gemini-2.5-flash
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_COLLECTION
+        value: workshop_rag_docs
+      - key: VECTOR_BACKEND
+        value: qdrant
+      - key: TOPK
+        value: "6"
+      - key: SCORE_THRESHOLD
+        value: "0.1"
+      - key: NUM_CANDIDATES
+        value: "400"
+      # Optional: if you use Atlas for config/logs
+      - key: ATLAS_DATA_API_BASE
+        sync: false
+      - key: ATLAS_DATA_API_KEY
+        sync: false
+      - key: ATLAS_DATA_SOURCE
+        value: Cluster0
+      - key: ATLAS_DATABASE
+        value: ragdb
+      - key: ATLAS_COLLECTION
+        value: docs
+      - key: ATLAS_SEARCH_INDEX
+        value: vector_index
+    autoDeploy: true
