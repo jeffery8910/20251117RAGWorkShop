@@ -19,7 +19,8 @@ cloud-app 已經整理成獨立的 Next.js 專案，可以直接從 GitHub 一�
 
 ### Vercel 一鍵部署
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=<YOUR_GITHUB_REPO_URL>&root-directory=.&project-name=rag-line-cloud-app&repository-name=rag-line-cloud-app&env=ADMIN_TOKEN,GEMINI_API_KEY,EMBED_MODEL,GEN_MODEL,LINE_CHANNEL_SECRET,LINE_CHANNEL_ACCESS_TOKEN,VECTOR_BACKEND,QDRANT_URL,QDRANT_API_KEY,QDRANT_COLLECTION,TOPK,SCORE_THRESHOLD,NUM_CANDIDATES,LOG_PROVIDER&envDescription=請依照 docs%2F16-cloud-app-deploy.md 設定環境變數&envLink=docs%2F16-cloud-app-deploy.md)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/jeffery8910/20251117RAGWorkShop&project-name=rag-line-cloud-app&repository-name=rag-line-cloud-app&env=ADMIN_TOKEN,GEMINI_API_KEY,EMBED_MODEL,GEN_MODEL,LINE_CHANNEL_SECRET,LINE_CHANNEL_ACCESS_TOKEN,VECTOR_BACKEND,QDRANT_URL,QDRANT_API_KEY,QDRANT_COLLECTION,TOPK,SCORE_THRESHOLD,NUM_CANDIDATES,LOG_PROVIDER&envDescription=請依照 docs%2F16-cloud-app-deploy.md 設定環境變數&envLink=docs%2F16-cloud-app-deploy.md)
+
 
 建議步驟：
 
@@ -41,7 +42,8 @@ cloud-app 已經整理成獨立的 Next.js 專案，可以直接從 GitHub 一�
 
 專案根目錄已包含 `render.yaml`，可以用 Render 的按鈕自動建立 Web Service：
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=<YOUR_GITHUB_REPO_URL>&dir=.)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/jeffery8910/20251117RAGWorkShop&dir=.)
+
 
 建議步驟：
 
