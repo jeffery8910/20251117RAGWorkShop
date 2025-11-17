@@ -18,12 +18,7 @@
 
 - 對話紀錄儲存（擇一，預設關閉）
   - `LOG_PROVIDER=none`（預設）
-  - `ATLAS_DATA_API_BASE`：App Services 啟用 Data API 後的 Base URL（通常以 `/action` 結尾）
-  - `ATLAS_DATA_API_KEY`：App Services → API Keys 建立
-  - `ATLAS_DATA_SOURCE`：例 `Cluster0`
-  - `ATLAS_DATABASE`、`ATLAS_COLLECTION`：例 `ragdb`、`docs`
-  - `ATLAS_SEARCH_INDEX`：例 `vector_index`
-  - 參考 docs/03b-mongodb-atlas-vector-search.md
+
   - 或（推薦）`LOG_PROVIDER=atlas-driver`（直連 Atlas，不走 Data API）
     - `MONGODB_URI`、`MONGODB_DB`
     - （可選）`MONGODB_COLLECTION_LOGS`、`MONGODB_COLLECTION_CONVERSATIONS`、`MONGODB_COLLECTION_CONFIG`

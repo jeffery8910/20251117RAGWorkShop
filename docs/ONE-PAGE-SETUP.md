@@ -1,170 +1,178 @@
-# 一頁式部署與設定指南（LINE × RAG × Qdrant）
+# 一頁完成：LINE + RAG + Qdrant（cloud-app）
 
-本文件從零開始，帶你把本專案部署到雲端、接上 LINE、上傳教材並完成測試。若只看一份文件，請看這份即可。
+這份文件給「只想跟著一步一步做完」的人：  
+照著做一輪，你就會得到一個可以接 LINE、用 RAG 回答問題的 cloud-app。
+
+> 本路線只使用 Qdrant + Gemini，不使用 Atlas Data API。  
+> 若要玩 Atlas，請看 `03b-mongodb-atlas-vector-search.md`（進階補充，可略過）。
 
 ---
 
-## 0. 你需要先準備
-- 一個 Vercel 專案（Root Directory 指向 `cloud-app/`）
-- 一個 LINE Messaging API Channel（可在 LINE Developers 申請）
-- Qdrant Cloud 叢集（或自架 Qdrant）
-- Google AI Studio API Key（Gemini）
+## 0. 你需要準備的東西
+
+- 一個 Vercel 帳號（建議主路線使用 Vercel 部署）
+- 一個 LINE Messaging API Channel（在 LINE Developers 建立）
+- 一個 Qdrant Cloud 專案（或自架 Qdrant）
+- 一把 Google AI Studio API Key（Gemini）
 
 ---
 
 ## 1. 在 Vercel 設定環境變數（一次到位）
-把下列鍵值加到 Vercel 專案 Settings → Environment Variables。若有「XXX」請換成你的實際值。
 
-必填（後台與模型）
-- `ADMIN_TOKEN`＝自行設定強密碼（用於 /admin 登入）
-- `GEMINI_API_KEY`＝你的 Google AI Studio API Key
-- `EMBED_MODEL`＝`text-embedding-004`（建議；固定 768 維）
-- `GEN_MODEL`＝`gemini-2.5-flash`
-- `DEFAULT_KEYWORDS`＝`help,課程,教材,客服`（關鍵字清單，逗號分隔；當未啟用 Atlas 設定庫時生效）
+到 Vercel → 專案 → `Settings` → `Environment Variables`，依序填入：
 
-向量庫（預設 Qdrant）
-- `VECTOR_BACKEND`＝`qdrant`
-- `QDRANT_URL`＝你的叢集 REST 基底 URL（不含子路徑，例如 `https://<cluster-id>.<region>.cloud.qdrant.io`）
-- `QDRANT_API_KEY`＝Qdrant 叢集 API Key（不是 collection 名稱）
-- `QDRANT_COLLECTION`＝集合名稱（例如 `workshop_rag_docs`，只放名稱即可）
-- （可選）`EMBED_DIM`＝`768`（若你改用 `gemini-embedding-001`，請加上此值以對齊 768 維）
+### 必填：系統與模型
 
-Atlas（可選，兩種路線）
-- A.（推薦）直連 Atlas 驅動（不走 Data API，避開 EOL 風險）：
-  - `LOG_PROVIDER=atlas-driver`
-  - `MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority&appName=<AppName>`
-  - `MONGODB_DB=ragdb`
-  - （可選集合名）`MONGODB_COLLECTION_LOGS=logs`、`MONGODB_COLLECTION_CONVERSATIONS=conversations`、`MONGODB_COLLECTION_CONFIG=config`
-- B.（不建議新案）App Services Data API：需 `ATLAS_DATA_API_BASE/KEY/DATA_SOURCE/DATABASE/COLLECTION`（EOL 中，僅供相容）
+- `ADMIN_TOKEN`  
+  - 自己取一組長一點的字串，用來登入 `/admin`。
+- `GEMINI_API_KEY`  
+  - 依 `docs/02-google-ai-studio-api-key.md` 建立。
+- `EMBED_MODEL`  
+  - 建議：`text-embedding-004`
+- `GEN_MODEL`  
+  - 建議：`gemini-2.5-flash`
 
-LINE（讓使用者在 LINE 中對話）
-- `LINE_CHANNEL_SECRET`＝LINE 後台 Basic settings → Channel secret
-- `LINE_CHANNEL_ACCESS_TOKEN`＝Messaging API → Issue 長期 Token
+### 必填：LINE
 
-可選（把回答委外到你的後端）
-- `ANSWER_WEBHOOK_URL`＝你的後端 API（POST `{ question, topK, scoreThreshold, numCandidates }`）
-- `ANSWER_WEBHOOK_TOKEN`＝Authorization: Bearer 使用
+- `LINE_CHANNEL_SECRET`  
+  - LINE Developers → Messaging API Channel → Basic settings → Channel secret
+- `LINE_CHANNEL_ACCESS_TOKEN`  
+  - LINE Developers → Messaging API → Issue channel access token
 
-可選（對話紀錄後端；預設關閉）
-- `LOG_PROVIDER`＝`none`（預設）或 `atlas` / `pg` / `mysql` / `supabase`
-  - Atlas：`ATLAS_DATA_API_BASE`、`ATLAS_DATA_API_KEY`、`ATLAS_DATA_SOURCE`、`ATLAS_DATABASE`、`ATLAS_COLLECTION`、`ATLAS_SEARCH_INDEX`
-  - Postgres：`DATABASE_URL`
-  - MySQL：`MYSQL_URL`
-  - Supabase：`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`
+### 必填：Qdrant
 
-版本固定（已內建，僅備註）
-- 本專案已鎖 Node 20：`package.json` → `engines.node=20.x`，`vercel.json` → `NODE_VERSION=20`
+- `VECTOR_BACKEND= qdrant`
+- `QDRANT_URL`  
+  - Qdrant Cloud Console → Cluster → REST URL（例如 `https://<cluster-id>.<region>.cloud.qdrant.io`）
+- `QDRANT_API_KEY`  
+  - Qdrant Cloud → API Keys
+- `QDRANT_COLLECTION`  
+  - 建議先用：`workshop_rag_docs`
+- （可選）`EMBED_DIM=768`  
+  - 僅在你改用 `gemini-embedding-001` 時需要，配合 768 維。
+
+### 選配：對話紀錄後端
+
+> 若只是跑工作坊主線，可以一律先設 `LOG_PROVIDER=none`，等熟悉後再加。
+
+- `LOG_PROVIDER`  
+  - 預設：`none`
+  - 若要開啟 MongoDB Atlas（Driver）：
+    - `LOG_PROVIDER=atlas-driver`
+    - `MONGODB_URI`
+    - `MONGODB_DB`
+    - 可選：`MONGODB_COLLECTION_LOGS`、`MONGODB_COLLECTION_CONVERSATIONS`、`MONGODB_COLLECTION_CONFIG`
+  - 若要用 Postgres：
+    - `LOG_PROVIDER=pg`
+    - `DATABASE_URL`
+  - 若要用 MySQL：
+    - `LOG_PROVIDER=mysql`
+    - `MYSQL_URL`
+  - 若要用 Supabase：
+    - `LOG_PROVIDER=supabase`
+    - `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`
+
+### 選配：外部回答後端
+
+- `ANSWER_WEBHOOK_URL`  
+  - 若你有自己的 API，可以讓 cloud-app 把 `{ question, topK, scoreThreshold, numCandidates }` POST 過去。
+- `ANSWER_WEBHOOK_TOKEN`  
+  - 對應 Authorization: Bearer 的 token。
 
 ---
 
-## 2. 重新部署
-- 在 Vercel 按「Redeploy」，建議勾選「Clear build cache」。
-- 部署完成後，管理後台位址：`https://<你的域名>/admin`（先輸入 `ADMIN_TOKEN`）。
+## 2. 重新部署 cloud-app
+
+1. 在 Vercel 專案頁面按 `Redeploy`（必要時勾選 `Clear build cache`）。
+2. 部署完成後，記住你的網址，例如：`https://your-app.vercel.app`。
+3. 在瀏覽器開啟 `https://your-app.vercel.app/admin`：
+   - 第一次會要求輸入 `ADMIN_TOKEN`，輸入你剛在環境變數設定的值。
 
 ---
 
-## 3. LINE 後台（Messaging API）設定
-- Webhook URL：`https://<你的域名>/api/line-webhook`
-- Use webhook：開啟
-- Auto-reply / Greeting：建議關閉（避免雙重回覆；如需歡迎詞，可在我們的 webhook 實作 follow 事件）
-- 把 `Channel secret` 與 `Channel access token` 貼回 Vercel 對應變數
+## 3. 設定 LINE Webhook
 
-驗證 Webhook（選用，從本機測）
+1. 到 LINE Developers → Messaging API Channel
+2. 設定：
+   - Webhook URL：`https://your-app.vercel.app/api/line-webhook`
+   - Use webhook：開啟
+   - Auto-reply / Greeting：建議關閉（避免跟 bot 回覆重疊）
+3. 把 `Channel secret`、`Channel access token` 填回剛剛的 Vercel 環境變數（已做過可以略過）。
+
+簡單測試 Webhook（選配）：
+
 ```bash
 BODY='{"events":[{"type":"message","message":{"type":"text","text":"help"},"replyToken":"DUMMY","source":{"type":"user","userId":"Utest"}}]}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$LINE_CHANNEL_SECRET" -binary | openssl base64 -A)
-curl -sS -i https://<你的域名>/api/line-webhook \
+curl -sS -i https://your-app.vercel.app/api/line-webhook \
   -H "content-type: application/json" \
   -H "X-Line-Signature: $SIG" \
   --data "$BODY"
-# 期待 HTTP/1.1 200 OK
+# 正常會看到 HTTP/1.1 200 OK
 ```
 
 ---
 
-## 4. 上傳教材與測試
-- /admin →「3) 上傳教材（檔案上傳）」：支援 .pdf/.txt/.md/.docx
-  - 分塊大小、重疊以「字元數」計算（不是 tokens）。建議 size=600–1000、overlap=10–20% 的 size。
-- /admin →「4) 上傳教材（貼上純文字）」：快速測試路徑，預設 size=800、overlap=120
-- /admin →「5) 線上測試」：輸入問題直送 RAG（不經 LINE）
-- 在 LINE 對 bot 輸入「help」或提問（命中 `DEFAULT_KEYWORDS` 則走快捷回覆）
+## 4. 在 `/admin` 上傳知識庫並測試
+
+- `/admin` → 3) 檔案上傳（支援 `.pdf/.txt/.md/.docx`）
+  - 選擇你的講義 / 說明文件上傳。
+  - chunk 參數建議：`size = 600–1000`、`overlap = 10–20%`。
+- `/admin` → 4) 貼上文字
+  - 適合貼 FAQ / 短說明，不必另外存檔。
+- `/admin` → 5) 測試
+  - 輸入問題，例如「這個服務的計價方式是什麼？」  
+  - 確認能看到來自 Qdrant 的 hits（source / page / score）。
 
 ---
 
 ## 5. 快速自我檢查
+
 - Qdrant URL 格式
-  - `QDRANT_URL` 只能是「叢集基底 URL」，不要帶 `/collections` 或 `/dashboard`
-  - `QDRANT_COLLECTION` 只放名稱（例如 `workshop_rag_docs`）
-- 維度一致
-  - `text-embedding-004` 固定 768；若用 `gemini-embedding-001` 請加 `EMBED_DIM=768`，或清空/改新 collection
+  - `QDRANT_URL` 應該是純 API URL，不要帶 `/collections` 或 `/dashboard`。
+  - `QDRANT_COLLECTION` 只是一個名字，例如 `workshop_rag_docs`。
+- 維度一致性
+  - `text-embedding-004` 原生 768 維；若切換到 `gemini-embedding-001`，請一起調整 `EMBED_DIM=768` 並重新建 collection。
 - 關鍵字來源
-  - 未設定 Atlas 時，/admin 的關鍵字變更不會持久化；請改用 `DEFAULT_KEYWORDS`（逗號分隔，完全相符比對）
+  - 預設的 `DEFAULT_KEYWORDS` 只影響關鍵字觸發行為，不再依賴 Atlas。
 - LINE 自動回覆
-  - 建議關閉 Auto-reply/Greeting，避免雙重回覆
+  - 若你開啟了 LINE 的 Auto-reply / Greeting，可能會跟 bot 回覆打架；建議關閉。
 
 ---
 
-## 6. 常見錯誤與對策
-- Qdrant 404 `page not found`
-  - 多為 `QDRANT_URL` 或 `QDRANT_COLLECTION` 寫錯路徑（用 cluster 基底 URL、collection 只放名稱）
-- Qdrant 400 `Bad Request`
-  - 幾乎都是「向量維度不相容」。清空集合、對齊 EMBED_MODEL/EMBED_DIM=768，或用新 `QDRANT_COLLECTION`
-- 403 `forbidden`
-  - API Key 錯或權限不符；請用叢集 API Key
-- LINE 沒回覆
-  - Webhook URL 非 `/api/line-webhook` / 簽章錯 / Auto-reply 干擾 / 關鍵字沒命中（完全相符）
-- PDF 解析失敗
-  - 檔案受保護或格式特殊→先轉成文字測試；或改用其他 PDF
+## 6. 一份 .env 範例（可先在本機測試，再貼到 Vercel）
 
----
-
-## 7. 參數與最佳實務（精簡版）
-- `TOPK`：每次檢索片段數。建議 4–8
-- `SCORE_THRESHOLD`（Qdrant）：相似度門檻 0.10–0.30
-- `NUM_CANDIDATES`（Atlas）：候選數 200–800
-- `chunkSize`：每塊字元數 600–1000
-- `overlap`：重疊字元數，約為 `chunkSize` 的 10–20%
-- 詳細版：`docs/retrieval-parameters.md`
-
----
-
-## 8. 一鍵 .env 樣板（可複製貼上再到 Vercel 填入）
 ```env
 # 基本
-ADMIN_TOKEN=請填
-GEMINI_API_KEY=請填
+ADMIN_TOKEN=請自行設定
+GEMINI_API_KEY=請填入你的 Gemini API Key
 EMBED_MODEL=text-embedding-004
 GEN_MODEL=gemini-2.5-flash
-DEFAULT_KEYWORDS=help,課程,教材,客服
+DEFAULT_KEYWORDS=help,課程,說明,客服
 
-# Qdrant（預設向量庫）
+# Qdrant（向量庫）
 VECTOR_BACKEND=qdrant
 QDRANT_URL=https://<cluster-id>.<region>.cloud.qdrant.io
-QDRANT_API_KEY=請填
+QDRANT_API_KEY=請填入 Qdrant API Key
 QDRANT_COLLECTION=workshop_rag_docs
-# 若改用 gemini-embedding-001，建議鎖 EMBED_DIM=768
-# EMBED_DIM=768
 
 # LINE
-LINE_CHANNEL_SECRET=請填
-LINE_CHANNEL_ACCESS_TOKEN=請填
+LINE_CHANNEL_SECRET=請填入 LINE Channel secret
+LINE_CHANNEL_ACCESS_TOKEN=請填入 LINE Access token
 
-# 對話紀錄後端（預設 none）
+# 對話紀錄（預設關閉）
 LOG_PROVIDER=none
-# 若改 atlas / pg / mysql / supabase，請補齊對應變數
+# 若改用 atlas-driver / pg / mysql / supabase，請依各自需求補齊對應連線字串。
 ```
 
 ---
 
-## 9. 驗收清單
-- [ ] `/admin` 能登入（ADMIN_TOKEN）
-- [ ] `/admin/setup` Qdrant/Atlas 顯示 OK
-- [ ] 能上傳教材（檔案或純文字）
-- [ ] /admin 線上測試能回覆
-- [ ] LINE 對話能回覆；`help` 命中 `DEFAULT_KEYWORDS` 可回快捷說明
+## 7. 完成前最後確認
 
----
+- [ ] 能登入 `/admin`（ADMIN_TOKEN 正確）
+- [ ] `/admin/setup` 顯示 Qdrant / Gemini 狀態正常
+- [ ] 已用檔案上傳或貼上文字建好一點知識庫
+- [ ] 在 LINE bot 輸入問題時，看到的是根據知識庫內容回答的 RAG 回覆，而不是預設空白答案
 
-附註
-- 本專案的 API route 皆設為 `dynamic='force-dynamic'`、`revalidate=0`，避免 build 期對外呼叫造成部署失敗。
-- pdf 解析採穩定路徑，並在 UI 顯示上傳進度與伺服器處理中提示。
+做到這裡，你就完成一個可用的 LINE x RAG cloud-app。  
+後續可以再探索 `/admin` 的「測驗」、「向量分析」等進階功能。 

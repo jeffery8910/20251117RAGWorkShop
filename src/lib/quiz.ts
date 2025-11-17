@@ -1,7 +1,6 @@
 import { embedText, generateWithContext } from './gemini';
 import { getRuntimeConfig } from './config';
 import * as qdr from './qdrant';
-import { aggregate } from './mongo';
 
 export type QuizItem = {
   question: string;
@@ -12,7 +11,6 @@ export type QuizItem = {
 
 export async function generateRagQuiz(topicOrQuestion: string): Promise<QuizItem> {
   const cfg = await getRuntimeConfig();
-  const backend = (process.env.VECTOR_BACKEND || 'qdrant').toLowerCase();
   const hasQdrant = Boolean(process.env.QDRANT_URL && process.env.QDRANT_API_KEY);
 
   // 1) 先用問題做 embedding
@@ -20,7 +18,7 @@ export async function generateRagQuiz(topicOrQuestion: string): Promise<QuizItem
 
   // 2) 依現有向量設定查找相關片段
   let hits: any[] = [];
-  if (backend === 'qdrant' && hasQdrant) {
+  if (hasQdrant) {
     const limit = Number(cfg.TOPK ?? 6);
     const scoreTh = Number.isFinite(cfg.SCORE_THRESHOLD) ? cfg.SCORE_THRESHOLD : undefined;
     const res = await qdr.search(queryVector, limit, scoreTh, undefined);
@@ -31,29 +29,6 @@ export async function generateRagQuiz(topicOrQuestion: string): Promise<QuizItem
       section: r?.payload?.section || '',
       score: r?.score,
     }));
-  } else if (process.env.ATLAS_DATA_API_BASE || process.env.ATLAS_DATA_API_URL) {
-    const pipe = [
-      {
-        $vectorSearch: {
-          index: process.env.ATLAS_SEARCH_INDEX,
-          path: 'embedding',
-          queryVector,
-          numCandidates: Number(cfg.NUM_CANDIDATES ?? 400),
-          limit: Number(cfg.TOPK ?? 6),
-        },
-      },
-      {
-        $project: {
-          content: 1,
-          source: 1,
-          page: 1,
-          section: 1,
-          score: { $meta: 'vectorSearchScore' },
-        },
-      },
-    ];
-    const r: any = await aggregate(pipe);
-    hits = r?.documents || [];
   }
 
   // 3) 組合 context 文字

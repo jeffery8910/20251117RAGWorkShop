@@ -37,16 +37,5 @@ services:
       - key: NUM_CANDIDATES
         value: "400"
       # Optional: if you use Atlas for config/logs
-      - key: ATLAS_DATA_API_BASE
-        sync: false
-      - key: ATLAS_DATA_API_KEY
-        sync: false
-      - key: ATLAS_DATA_SOURCE
-        value: Cluster0
-      - key: ATLAS_DATABASE
-        value: ragdb
-      - key: ATLAS_COLLECTION
-        value: docs
-      - key: ATLAS_SEARCH_INDEX
-        value: vector_index
+
     autoDeploy: true

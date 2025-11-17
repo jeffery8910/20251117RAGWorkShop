@@ -1,4 +1,4 @@
-import { getConfig as getAtlasConfig } from './mongo';
+import { getConfig as getEnvConfig } from './mongo';
 import { atlasDriverConfigured, driverGetConfig } from './atlas-driver';
 
 export type RuntimeConfig = {
@@ -19,12 +19,12 @@ const defaultCfg: RuntimeConfig = {
 
 export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   try {
-    // Prefer Atlas config if envs are present
-    if (process.env.ATLAS_DATA_API_BASE || process.env.ATLAS_DATA_API_URL) {
-      const cfg = await getAtlasConfig();
-      return { ...defaultCfg, ...cfg };
-    } else if (atlasDriverConfigured()) {
+    // 優先使用 Atlas Driver（MONGODB_URI），否則退回環境變數／預設值
+    if (atlasDriverConfigured()) {
       const cfg = await driverGetConfig();
+      if (cfg) return { ...defaultCfg, ...cfg };
+    } else {
+      const cfg = await getEnvConfig();
       if (cfg) return { ...defaultCfg, ...cfg };
     }
   } catch {}
